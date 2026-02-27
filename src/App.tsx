@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { MemoryRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { User, Keluhan, CleaningLog, MaintenanceLog, SecurityLog } from './types';
@@ -12,47 +11,67 @@ import ComplaintsAdmin from './pages/ComplaintsAdmin';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 
+// IMPORT FIREBASE UTILS
+import { db } from './firebase';
+import { 
+  collection, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  query, 
+  orderBy 
+} from 'firebase/firestore';
+
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('pa_user');
     return saved ? JSON.parse(saved) : null;
   });
 
-  const [keluhans, setKeluhans] = useState<Keluhan[]>(() => {
-    const saved = localStorage.getItem('pa_keluhans');
-    return saved ? JSON.parse(saved) : [];
-  });
+  // State untuk data dari Firebase
+  const [keluhans, setKeluhans] = useState<Keluhan[]>([]);
+  const [cleaningLogs, setCleaningLogs] = useState<CleaningLog[]>([]);
+  const [maintLogs, setMaintLogs] = useState<MaintenanceLog[]>([]);
+  const [secLogs, setSecLogs] = useState<SecurityLog[]>([]);
 
-  const [cleaningLogs, setCleaningLogs] = useState<CleaningLog[]>(() => {
-    const saved = localStorage.getItem('pa_cleaning');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [maintLogs, setMaintLogs] = useState<MaintenanceLog[]>(() => {
-    const saved = localStorage.getItem('pa_maint');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [secLogs, setSecLogs] = useState<SecurityLog[]>(() => {
-    const saved = localStorage.getItem('pa_security');
-    return saved ? JSON.parse(saved) : [];
-  });
-
+  // 1. SINCRONIZE DATA KELUHAN DARI FIREBASE
   useEffect(() => {
-    localStorage.setItem('pa_keluhans', JSON.stringify(keluhans));
-  }, [keluhans]);
+    const q = query(collection(db, "complaints"), orderBy("id", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Keluhan));
+      setKeluhans(data);
+    });
+    return () => unsubscribe();
+  }, []);
 
+  // 2. SINCRONIZE DATA CLEANING DARI FIREBASE
   useEffect(() => {
-    localStorage.setItem('pa_cleaning', JSON.stringify(cleaningLogs));
-  }, [cleaningLogs]);
+    const unsubscribe = onSnapshot(collection(db, "cleaning"), (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as CleaningLog));
+      setCleaningLogs(data);
+    });
+    return () => unsubscribe();
+  }, []);
 
-  useEffect(() => {
-    localStorage.setItem('pa_maint', JSON.stringify(maintLogs));
-  }, [maintLogs]);
+  // FUNGSI HANDLER UNTUK FIREBASE
+  const handleAddKeluhan = async (k: any) => {
+    await addDoc(collection(db, "complaints"), k);
+  };
 
-  useEffect(() => {
-    localStorage.setItem('pa_security', JSON.stringify(secLogs));
-  }, [secLogs]);
+  const handleUpdateKeluhan = async (k: Keluhan) => {
+    const docRef = doc(db, "complaints", k.id);
+    await updateDoc(docRef, { ...k });
+  };
+
+  const handleDeleteKeluhan = async (id: string) => {
+    await deleteDoc(doc(db, "complaints", id));
+  };
+
+  const handleAddCleaning = async (l: any) => {
+    await addDoc(collection(db, "cleaning"), l);
+  };
 
   const handleLogin = (u: User) => {
     setUser(u);
@@ -69,9 +88,7 @@ const App: React.FC = () => {
   }, [keluhans]);
 
   const renderProtectedRoute = (Component: React.ElementType, props: any = {}) => {
-    if (!user) {
-      return <Login onLogin={handleLogin} />;
-    }
+    if (!user) return <Login onLogin={handleLogin} />;
     return <Component user={user} {...props} />;
   };
 
@@ -86,46 +103,33 @@ const App: React.FC = () => {
             <Routes>
               <Route path="/" element={
                 user ? (
-                  user.role === 'Admin' || user.role === 'Viewer' ? (
-                    <Dashboard keluhans={keluhans} cleaning={cleaningLogs} maintenance={maintLogs} security={secLogs} />
-                  ) : user.role === 'ChecklistMaint' ? (
-                    <CleaningChecklist 
-                      user={user} 
-                      logs={cleaningLogs} 
-                      onAdd={(l) => setCleaningLogs(prev => [l, ...prev])} 
-                      onDelete={(id) => setCleaningLogs(prev => prev.filter(l => String(l.id) !== String(id)))} 
-                    />
-                  ) : user.role === 'Security' ? (
-                    <SecurityPage 
-                      user={user} 
-                      logs={secLogs} 
-                      onAdd={(l) => setSecLogs(prev => [l, ...prev])} 
-                      onDelete={(id) => setSecLogs(prev => prev.filter(l => String(l.id) !== String(id)))} 
-                    />
-                  ) : (
-                    <Dashboard keluhans={keluhans} cleaning={cleaningLogs} maintenance={maintLogs} security={secLogs} />
-                  )
+                  <Dashboard keluhans={keluhans} cleaning={cleaningLogs} maintenance={maintLogs} security={secLogs} />
                 ) : (
-                  <PublicKeluhan existingKeluhans={keluhans} onAdd={(k) => setKeluhans(prev => [k, ...prev])} />
+                  <PublicKeluhan existingKeluhans={keluhans} onAdd={handleAddKeluhan} />
                 )
               } />
 
-              <Route path="/public" element={<PublicKeluhan existingKeluhans={keluhans} onAdd={(k) => setKeluhans(prev => [k, ...prev])} />} />
+              <Route path="/public" element={<PublicKeluhan existingKeluhans={keluhans} onAdd={handleAddKeluhan} />} />
               <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login onLogin={handleLogin} />} />
-              <Route path="/cleaning" element={renderProtectedRoute(CleaningChecklist, { logs: cleaningLogs, onAdd: (l: CleaningLog) => setCleaningLogs(prev => [l, ...prev]), onDelete: (id: string) => setCleaningLogs(prev => prev.filter(l => String(l.id) !== String(id))) })} />
-              <Route path="/maintenance" element={renderProtectedRoute(MaintenancePage, { logs: maintLogs, onAdd: (l: MaintenanceLog) => setMaintLogs(prev => [l, ...prev]), onDelete: (id: string) => setMaintLogs(prev => prev.filter(l => String(l.id) !== String(id))) })} />
-              <Route path="/security" element={renderProtectedRoute(SecurityPage, { logs: secLogs, onAdd: (l: SecurityLog) => setSecLogs(prev => [l, ...prev]), onDelete: (id: string) => setSecLogs(prev => prev.filter(l => String(l.id) !== String(id))) })} />
+              
+              <Route path="/cleaning" element={renderProtectedRoute(CleaningChecklist, { 
+                logs: cleaningLogs, 
+                onAdd: handleAddCleaning,
+                onDelete: async (id: string) => await deleteDoc(doc(db, "cleaning", id))
+              })} />
+
               <Route path="/complaints" element={
                 user?.role === 'Admin' ? (
                   <ComplaintsAdmin 
                     keluhans={keluhans} 
-                    onUpdate={(k) => setKeluhans(prev => prev.map(item => item.id === k.id ? k : item))} 
-                    onDelete={(id) => setKeluhans(prev => prev.filter(k => String(k.id) !== String(id)))} 
+                    onUpdate={handleUpdateKeluhan} 
+                    onDelete={handleDeleteKeluhan} 
                   />
                 ) : (
                   <Navigate to="/" replace />
                 )
               } />
+              
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>
