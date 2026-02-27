@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MemoryRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+// GANTI MemoryRouter MENJADI BrowserRouter
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { User, Keluhan, CleaningLog, MaintenanceLog, SecurityLog } from './types';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
@@ -30,48 +31,42 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : null;
   });
 
-  // State untuk data dari Firebase
   const [keluhans, setKeluhans] = useState<Keluhan[]>([]);
   const [cleaningLogs, setCleaningLogs] = useState<CleaningLog[]>([]);
   const [maintLogs, setMaintLogs] = useState<MaintenanceLog[]>([]);
   const [secLogs, setSecLogs] = useState<SecurityLog[]>([]);
 
-  // 1. SINCRONIZE DATA KELUHAN DARI FIREBASE
+  // 1. SINCRONIZE DATA DARI FIREBASE (REAL-TIME)
   useEffect(() => {
-    const q = query(collection(db, "complaints"), orderBy("id", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Keluhan));
-      setKeluhans(data);
+    const unsubKeluhan = onSnapshot(query(collection(db, "complaints"), orderBy("id", "desc")), (snap) => {
+      setKeluhans(snap.docs.map(d => ({ ...d.data(), id: d.id } as Keluhan)));
     });
-    return () => unsubscribe();
+    const unsubCleaning = onSnapshot(collection(db, "cleaning"), (snap) => {
+      setCleaningLogs(snap.docs.map(d => ({ ...d.data(), id: d.id } as CleaningLog)));
+    });
+    const unsubMaint = onSnapshot(collection(db, "maintenance"), (snap) => {
+      setMaintLogs(snap.docs.map(d => ({ ...d.data(), id: d.id } as MaintenanceLog)));
+    });
+    const unsubSec = onSnapshot(collection(db, "security"), (snap) => {
+      setSecLogs(snap.docs.map(d => ({ ...d.data(), id: d.id } as SecurityLog)));
+    });
+
+    return () => {
+      unsubKeluhan();
+      unsubCleaning();
+      unsubMaint();
+      unsubSec();
+    };
   }, []);
 
-  // 2. SINCRONIZE DATA CLEANING DARI FIREBASE
-  useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, "cleaning"), (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as CleaningLog));
-      setCleaningLogs(data);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // FUNGSI HANDLER UNTUK FIREBASE
-  const handleAddKeluhan = async (k: any) => {
-    await addDoc(collection(db, "complaints"), k);
-  };
-
-  const handleUpdateKeluhan = async (k: Keluhan) => {
-    const docRef = doc(db, "complaints", k.id);
-    await updateDoc(docRef, { ...k });
-  };
-
-  const handleDeleteKeluhan = async (id: string) => {
-    await deleteDoc(doc(db, "complaints", id));
-  };
-
-  const handleAddCleaning = async (l: any) => {
-    await addDoc(collection(db, "cleaning"), l);
-  };
+  // HANDLERS
+  const handleAddKeluhan = async (k: any) => { await addDoc(collection(db, "complaints"), k); };
+  const handleUpdateKeluhan = async (k: Keluhan) => { await updateDoc(doc(db, "complaints", k.id), { ...k }); };
+  const handleDeleteKeluhan = async (id: string) => { await deleteDoc(doc(db, "complaints", id)); };
+  
+  const handleAddCleaning = async (l: any) => { await addDoc(collection(db, "cleaning"), l); };
+  const handleAddMaint = async (l: any) => { await addDoc(collection(db, "maintenance"), l); };
+  const handleAddSec = async (l: any) => { await addDoc(collection(db, "security"), l); };
 
   const handleLogin = (u: User) => {
     setUser(u);
@@ -96,7 +91,6 @@ const App: React.FC = () => {
     <Router>
       <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
         {user && <Sidebar user={user} onLogout={handleLogout} />}
-        
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {user && <Header user={user} pendingComplaints={pendingComplaints} />}
           <div className="flex-1 overflow-y-auto p-4 md:p-8">
@@ -108,28 +102,12 @@ const App: React.FC = () => {
                   <PublicKeluhan existingKeluhans={keluhans} onAdd={handleAddKeluhan} />
                 )
               } />
-
               <Route path="/public" element={<PublicKeluhan existingKeluhans={keluhans} onAdd={handleAddKeluhan} />} />
               <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login onLogin={handleLogin} />} />
-              
-              <Route path="/cleaning" element={renderProtectedRoute(CleaningChecklist, { 
-                logs: cleaningLogs, 
-                onAdd: handleAddCleaning,
-                onDelete: async (id: string) => await deleteDoc(doc(db, "cleaning", id))
-              })} />
-
-              <Route path="/complaints" element={
-                user?.role === 'Admin' ? (
-                  <ComplaintsAdmin 
-                    keluhans={keluhans} 
-                    onUpdate={handleUpdateKeluhan} 
-                    onDelete={handleDeleteKeluhan} 
-                  />
-                ) : (
-                  <Navigate to="/" replace />
-                )
-              } />
-              
+              <Route path="/cleaning" element={renderProtectedRoute(CleaningChecklist, { logs: cleaningLogs, onAdd: handleAddCleaning, onDelete: (id: string) => deleteDoc(doc(db, "cleaning", id)) })} />
+              <Route path="/maintenance" element={renderProtectedRoute(MaintenancePage, { logs: maintLogs, onAdd: handleAddMaint, onDelete: (id: string) => deleteDoc(doc(db, "maintenance", id)) })} />
+              <Route path="/security" element={renderProtectedRoute(SecurityPage, { logs: secLogs, onAdd: handleAddSec, onDelete: (id: string) => deleteDoc(doc(db, "security", id)) })} />
+              <Route path="/complaints" element={user?.role === 'Admin' ? <ComplaintsAdmin keluhans={keluhans} onUpdate={handleUpdateKeluhan} onDelete={handleDeleteKeluhan} /> : <Navigate to="/" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>
